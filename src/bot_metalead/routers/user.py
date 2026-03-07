@@ -51,7 +51,7 @@ ACTIVE_TASK_STATUSES = [
 @router.callback_query(F.data == "tasks:active")
 async def cb_tasks_active(call: CallbackQuery, state: FSMContext):
     async with session_scope() as session:
-        user = await ensure_user(session, call.from_user.id)
+        user = await ensure_user(session, call.from_user)
 
         if not user:
             await call.answer("Пользователь не найден. Нажми /start", show_alert=True)
