@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from config import DATABASE_URL
+from src.bot_metalead.config import DATABASE_URL
 
 # Пример: postgresql+asyncpg://user:pass@localhost:5432/dbname
 #DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/app")
