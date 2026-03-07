@@ -5,7 +5,7 @@ from datetime import datetime, time as dtime, timezone
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message
 
-from db.repositories.users_repo import ensure_user
+from src.bot_metalead.db.repositories.users_repo import ensure_user
 from src.bot_metalead.db.repositories.tasks_repo import get_active_tasks_by_assignee
 
 from src.bot_metalead.keyboards.manager_tasks import kb_task_open, kb_tasks_pick
