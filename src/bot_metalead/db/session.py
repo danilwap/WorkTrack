@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 # Пример: postgresql+asyncpg://user:pass@localhost:5432/dbname
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/app")
+#DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/app")
 
 # В проде часто ставят pool_pre_ping=True, чтобы не падать на "stale connections"
 engine: AsyncEngine = create_async_engine(

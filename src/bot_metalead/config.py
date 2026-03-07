@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not BOT_TOKEN:
     raise RuntimeError("Не найден BOT_TOKEN. Укажи его в .env")
@@ -19,9 +20,6 @@ logging.basicConfig(level=logging.INFO)
 dp = Dispatcher()
 
 
-@dp.message(CommandStart())
-async def start_handler(message: Message):
-    await message.answer("Привет! Я бот. Нажми /help или просто напиши сообщение 🙂")
 
 
 @dp.message()
