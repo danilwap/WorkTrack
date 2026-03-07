@@ -32,14 +32,6 @@ async def on_startup():
         await conn.run_sync(Base.metadata.create_all)
 
 
-@dp.message(CommandStart())
-async def start_handler(message: Message):
-    await message.answer("Привет! Я бот. Нажми /help или просто напиши сообщение 🙂")
-
-
-@dp.message()
-async def echo_handler(message: Message):
-    await message.answer(f"Ты написал: {message.text}")
 
 
 async def main():

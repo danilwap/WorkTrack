@@ -49,7 +49,7 @@ def kb_task_card(task_id: int, status: str) -> InlineKeyboardMarkup:
         kb.button(text="✅ Апрув", callback_data=f"mtask:approve:{task_id}")
         kb.button(text="❌ Отклонить", callback_data=f"mtask:reject:{task_id}")
 
-    kb.button(text="🗑 Закрыть/Отменить", callback_data=f"mtask:cancel:{task_id}")
+    kb.button(text="🗑 Отменить", callback_data=f"mtask:cancel:{task_id}")
     kb.button(text="⬅️ Назад к списку", callback_data="mtasks:list")
     kb.adjust(1, 1, 1, 2, 1, 1)
     return kb.as_markup()

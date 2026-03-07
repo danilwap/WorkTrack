@@ -33,4 +33,7 @@ class Notes(StatesGroup):
     comment_choose = State()
     comment_text = State()
 
+    edit_title = State()
+    edit_body = State()
+
     close_choose = State()

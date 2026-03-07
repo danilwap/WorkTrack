@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
+from io import BytesIO
 from typing import Optional
 
+from PIL import Image, ImageDraw, ImageFont
 from aiogram import Bot
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 
 from sqlalchemy import and_, select, func
@@ -52,10 +54,149 @@ TASKS_PICK_PAGE = "tasks_pick_page"
 EMP_PICK_IDS = "emp_pick_ids"
 EMP_PICK_PAGE = "emp_pick_page"
 
+
 # где-нибудь в роутере
 @router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer()
+
+
+def render_tasks_table(
+        rows: list[tuple[str, str, str]],
+        title: str = "Активные задачи",
+        rows_per_image: int = 20,
+) -> list[BytesIO]:
+    """
+    Рисует таблицу задач и возвращает список PNG-картинок в BytesIO.
+    rows: [(assignee, task_title, deadline), ...]
+    """
+
+    if not rows:
+        rows = [("—", "Нет активных задач", "—")]
+
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    font_bold_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+    try:
+        font = ImageFont.truetype(font_path, 20)
+        font_bold = ImageFont.truetype(font_bold_path, 22)
+        font_title = ImageFont.truetype(font_bold_path, 24)
+    except Exception:
+        font = ImageFont.load_default()
+        font_bold = ImageFont.load_default()
+        font_title = ImageFont.load_default()
+
+    padding = 30
+    row_h = 42
+    header_h = 45
+    title_h = 55
+    bottom_pad = 20
+
+    # Исполнитель | Задача | Дедлайн
+    col_widths = [260, 520, 180]
+    total_width = sum(col_widths) + padding * 2
+
+    chunks = [
+        rows[i:i + rows_per_image]
+        for i in range(0, len(rows), rows_per_image)
+    ]
+
+    result: list[BytesIO] = []
+
+    for page_num, chunk in enumerate(chunks, start=1):
+        page_title = title
+        if len(chunks) > 1:
+            page_title += f" — часть {page_num}/{len(chunks)}"
+
+        total_height = (
+                padding
+                + title_h
+                + header_h
+                + len(chunk) * row_h
+                + bottom_pad
+                + padding
+        )
+
+        img = Image.new("RGB", (total_width, total_height), "white")
+        draw = ImageDraw.Draw(img)
+
+        # Заголовок
+        draw.text((padding, padding), page_title, font=font_title, fill="black")
+
+        y = padding + title_h
+
+        headers = ["Исполнитель", "Задача", "Дедлайн"]
+
+        x = padding
+        for idx, header in enumerate(headers):
+            w = col_widths[idx]
+            draw.rectangle((x, y, x + w, y + header_h), outline="black", width=2)
+            draw.text((x + 10, y + 10), header, font=font_bold, fill="black")
+            x += w
+
+        y += header_h
+
+        for assignee, task_title, deadline in chunk:
+            x = padding
+            values = [assignee, task_title, deadline]
+
+            for idx, value in enumerate(values):
+                w = col_widths[idx]
+                draw.rectangle((x, y, x + w, y + row_h), outline="black", width=1)
+                draw.text((x + 10, y + 10), str(value), font=font, fill="black")
+                x += w
+
+            y += row_h
+
+        bio = BytesIO()
+        img.save(bio, format="PNG")
+        bio.seek(0)
+        result.append(bio)
+
+    return result
+
+
+async def get_current_user_by_tg_id(session, tg_id: int) -> User | None:
+    q = await session.execute(select(User).where(User.tg_id == tg_id))
+    return q.scalar_one_or_none()
+
+
+def is_manager_role(role: UserRole | str | None) -> bool:
+    return role in (UserRole.manager, UserRole.admin)
+
+
+async def load_tasks_stats_rows(session) -> list[tuple]:
+    last_comment_text = (
+        select(TaskComment.text)
+        .where(TaskComment.task_id == Task.id)
+        .order_by(TaskComment.created_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+    Assignee = aliased(User)
+
+    q = await session.execute(
+        select(
+            Task.id,
+            Task.title,
+            Task.deadline_at,
+            Task.status,
+            Assignee.full_name,
+            Assignee.username,
+            last_comment_text.label("last_comment"),
+        )
+        .select_from(Task)
+        .join(Assignee, Assignee.id == Task.assignee_id, isouter=True)
+        .where(Task.status.in_([
+            TaskStatus.new,
+            TaskStatus.in_progress,
+            TaskStatus.on_review,
+            TaskStatus.done,
+        ]))
+        .order_by(Task.status.asc(), Task.created_at.desc())
+    )
+    return q.all()
 
 
 @router.callback_query(F.data.startswith("mtasks:employeepage:"))
@@ -71,7 +212,8 @@ async def cb_employees_page(call: CallbackQuery, state: FSMContext):
         employees = q.scalars().all()
 
     if not employees:
-        await wizard_show_from_callback(call, state, "Сотрудники (employee) не найдены.", reply_markup=kb_back_to_menu())
+        await wizard_show_from_callback(call, state, "Сотрудники (employee) не найдены.",
+                                        reply_markup=kb_back_to_menu())
         await call.answer()
         return
 
@@ -127,7 +269,6 @@ async def cb_pick_employee(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-
 def kb_employees_pick(employees, page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
     """
     callback: mtasks:employee:<user_id>
@@ -150,10 +291,10 @@ def kb_employees_pick(employees, page: int = 0, per_page: int = 8) -> InlineKeyb
 
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="⬅️", callback_data=f"mtasks:employeepage:{page-1}")
-    nav.button(text=f"{page+1}/{pages}", callback_data="noop")
+        nav.button(text="⬅️", callback_data=f"mtasks:employeepage:{page - 1}")
+    nav.button(text=f"{page + 1}/{pages}", callback_data="noop")
     if page < pages - 1:
-        nav.button(text="➡️", callback_data=f"mtasks:employeepage:{page+1}")
+        nav.button(text="➡️", callback_data=f"mtasks:employeepage:{page + 1}")
 
     kb.adjust(1)
     kb.row(*nav.buttons)
@@ -163,11 +304,13 @@ def kb_employees_pick(employees, page: int = 0, per_page: int = 8) -> InlineKeyb
 
     return kb.as_markup()
 
+
 async def wizard_add_extra(state: FSMContext, msg_id: int) -> None:
     data = await state.get_data()
     arr = list(data.get(WIZARD_EXTRA_KEY) or [])
     arr.append(msg_id)
     await state.update_data(**{WIZARD_EXTRA_KEY: arr})
+
 
 async def wizard_delete_extras(bot: Bot, chat_id: int, state: FSMContext) -> None:
     data = await state.get_data()
@@ -179,6 +322,7 @@ async def wizard_delete_extras(bot: Bot, chat_id: int, state: FSMContext) -> Non
             pass
     await state.update_data(**{WIZARD_EXTRA_KEY: []})
 
+
 async def wizard_drop_markup(bot: Bot, chat_id: int, state: FSMContext) -> None:
     data = await state.get_data()
     mid = data.get(WIZARD_KEY)
@@ -189,10 +333,12 @@ async def wizard_drop_markup(bot: Bot, chat_id: int, state: FSMContext) -> None:
     except Exception:
         pass
 
+
 async def wizard_clear(message_or_call, state: FSMContext) -> None:
     try:
         bot = message_or_call.bot
-        chat_id = message_or_call.message.chat.id if hasattr(message_or_call, "message") and message_or_call.message else message_or_call.chat.id
+        chat_id = message_or_call.message.chat.id if hasattr(message_or_call,
+                                                             "message") and message_or_call.message else message_or_call.chat.id
     except Exception:
         # если не смогли вытащить chat_id/bot — просто чистим ключ
         await state.update_data(**{WIZARD_KEY: None})
@@ -200,6 +346,7 @@ async def wizard_clear(message_or_call, state: FSMContext) -> None:
 
     await wizard_drop_markup(bot, chat_id, state)
     await state.update_data(**{WIZARD_KEY: None})
+
 
 async def wizard_show_from_callback(call: CallbackQuery, state: FSMContext, text: str, reply_markup=None) -> int:
     data = await state.get_data()
@@ -228,11 +375,11 @@ async def wizard_show_from_callback(call: CallbackQuery, state: FSMContext, text
 
 
 async def wizard_show_from_message(
-    message: Message,
-    state: FSMContext,
-    text: str,
-    reply_markup=None,
-    delete_previous: bool = True,
+        message: Message,
+        state: FSMContext,
+        text: str,
+        reply_markup=None,
+        delete_previous: bool = True,
 ) -> int:
     """
     Показ шага из message-хендлера:
@@ -254,7 +401,6 @@ async def wizard_show_from_message(
     msg = await message.answer(text, reply_markup=reply_markup)
     await state.update_data(**{WIZARD_KEY: msg.message_id})
     return msg.message_id
-
 
 
 async def notify_assignee(bot: Bot, task_id: int,
@@ -519,7 +665,6 @@ async def msg_new_description(message: Message, state: FSMContext):
         reply_markup=kb_back_to_menu(),
         delete_previous=True,
     )
-
 
 
 @router.message(ManagerTasks.new_deadline)
@@ -1045,7 +1190,7 @@ async def msg_task_comment(message: Message, state: FSMContext, bot: Bot):
         reply_markup=kb_task_open(task_id),
         delete_previous=True,
     )
-    await wizard_clear(state)
+    await wizard_clear(message, state)
 
 
 @router.callback_query(F.data.startswith("mtask:comments:"))
@@ -1694,7 +1839,7 @@ async def cb_task_cancel_comment(call: CallbackQuery, state: FSMContext, bot: Bo
                 TaskComment(
                     task_id=task_id,
                     author_id=manager.id,
-                    text="Закрыто администратором бота"
+                    text="Отменена администратором бота"
                 )
             )
 
@@ -1843,69 +1988,136 @@ def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
 @router.callback_query(F.data == "mgr:tasks:stats")
 async def cb_manager_tasks_stats(call: CallbackQuery):
     async with session_scope() as session:
-        # 1) Проверка роли
-        q = await session.execute(select(User).where(User.tg_id == call.from_user.id))
-        me = q.scalar_one_or_none()
-        if not me or me.role not in (UserRole.manager, UserRole.admin):
+        me = await get_current_user_by_tg_id(session, call.from_user.id)
+
+        if not is_manager_role(me.role if me else None):
             await call.answer("Доступно только менеджеру", show_alert=True)
             return
 
-        # 2) Коррелированные подзапросы: последний комментарий по задаче
-        last_comment_text = (
-            select(TaskComment.text)
-            .where(TaskComment.task_id == Task.id)
-            .order_by(TaskComment.created_at.desc())
-            .limit(1)
-            .scalar_subquery()
-        )
+        now = datetime.now(UTC)
 
-        # 3) Вытаскиваем активные и done
-        #    assignee может быть NULL, поэтому left join через relationship (просто читаем Task.assignee отдельно)
+        q = await session.execute(
+            select(Task.status, func.count(Task.id))
+            .where(Task.status.in_([
+                TaskStatus.new,
+                TaskStatus.in_progress,
+                TaskStatus.on_review
+            ]))
+            .group_by(Task.status)
+        )
+        grouped = {status: count for status, count in q.all()}
+
+        new_count = grouped.get(TaskStatus.new, 0)
+        cancel_count = grouped.get(TaskStatus.cancelled, 0)
+        in_progress_count = grouped.get(TaskStatus.in_progress, 0)
+        on_review_count = grouped.get(TaskStatus.on_review, 0)
+        active_total = new_count + in_progress_count + on_review_count
+
+        q = await session.execute(
+            select(func.count(Task.id))
+            .where(
+                Task.status.in_([
+                    TaskStatus.new,
+                    TaskStatus.in_progress,
+                    TaskStatus.on_review
+                ]),
+                Task.deadline_at.is_not(None),
+                Task.deadline_at < now
+            )
+        )
+        overdue_count = q.scalar() or 0
+
+        q = await session.execute(
+            select(func.count(Task.id))
+            .where(
+                Task.status.in_([
+                    TaskStatus.new,
+                    TaskStatus.in_progress,
+                    TaskStatus.on_review
+                ]),
+                Task.assignee_id.is_(None)
+            )
+        )
+        unassigned_count = q.scalar() or 0
+
+        q = await session.execute(
+            select(func.count(Task.id))
+            .where(Task.status == TaskStatus.done)
+        )
+        done_count = q.scalar() or 0
+
         Assignee = aliased(User)
 
         q = await session.execute(
             select(
-                Task.id,
                 Task.title,
                 Task.deadline_at,
-                Task.status,
                 Assignee.full_name,
-                Assignee.username,
-                last_comment_text.label("last_comment"),
+                Assignee.username
             )
             .select_from(Task)
             .join(Assignee, Assignee.id == Task.assignee_id, isouter=True)
-            .where(Task.status.in_([TaskStatus.new, TaskStatus.in_progress, TaskStatus.on_review, TaskStatus.done]))
-            .order_by(Task.status.asc(), Task.created_at.desc())
+            .where(
+                Task.status.in_([
+                    TaskStatus.new,
+                    TaskStatus.in_progress,
+                    TaskStatus.on_review
+                ])
+            )
+            .order_by(
+                Task.deadline_at.is_(None),
+                Task.deadline_at.asc(),
+                Task.created_at.desc()
+            )
         )
         items = q.all()
 
-    # 4) Формируем строки
-    active_rows: list[tuple[str, str, str, str]] = []
-    done_rows: list[tuple[str, str, str, str]] = []
+    text = (
+        "📊 Статистика по задачам\n\n"
+        f"Всего активных: {active_total}\n"
+        f"• New: {new_count}\n"
+        f"• Отменённые: {cancel_count}\n"
+        f"• Просрочено: {overdue_count}\n"
+        f"• Без исполнителя: {unassigned_count}\n\n"
+        f"Завершённых: {done_count}"
+    )
 
-    for _id, title, deadline_at, status, full_name, username, last_comment in items:
-        assignee = full_name or (f"@{username}" if username else "—")
-        row = (
-            _short(assignee, 18),
-            _short(title, 22),
-            _fmt_dt(deadline_at),
-            _short(last_comment, 60),
-        )
-        if status == TaskStatus.done:
-            done_rows.append(row)
-        else:
-            active_rows.append(row)
-
-    text = "📊 Статистика по задачам\n\n"
-    text += _render_table(active_rows, "🟡 В работе (new / in_progress / on_review)")
-    text += _render_table(done_rows, "🟢 Завершённые (done)")
-
-    # 5) Отправка (режем на части)
-    parts = _split_for_tg(text)
     if call.message:
-        # первое — редактируем, остальные — отдельными сообщениями
-        await call.message.edit_text(parts[0], reply_markup=kb_back_to_menu())
-        for p in parts[1:]:
-            await call.message.answer(p)
+        rows: list[tuple[str, str, str]] = []
+
+        for title, deadline_at, full_name, username in items:
+            assignee = full_name or (f"@{username}" if username else "—")
+            rows.append((
+                _short(assignee, 18),
+                _short(title, 36),
+                _fmt_dt(deadline_at),
+            ))
+
+        images = render_tasks_table(
+            rows=rows,
+            title="Активные задачи",
+            rows_per_image=20
+        )
+
+        # Удаляем старое сообщение с кнопкой, чтобы вместо него отправить фото с caption
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+
+        for i, bio in enumerate(images, start=1):
+            photo = BufferedInputFile(
+                bio.getvalue(),
+                filename=f"tasks_{i}.png"
+            )
+
+            if i == 1:
+                await call.message.answer_photo(
+                    photo=photo,
+                    caption=text,
+                    reply_markup=kb_back_to_menu()
+                )
+            else:
+                await call.message.answer_photo(photo=photo)
+
     await call.answer()

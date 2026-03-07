@@ -47,9 +47,17 @@ async def cb_main_menu(call: CallbackQuery, state: FSMContext):
         username=call.from_user.username,
         full_name=call.from_user.full_name
     )
-    await state.set_state(Main.menu)
-    await call.message.edit_text(
-        "🏠 Главное меню",
-        reply_markup=kb_main_menu(role=user.role)
-    )
+    text = "🏠 Главное меню"
+    try:
+        if call.message.photo:
+            await call.message.delete()
+            await call.message.answer(text,
+            reply_markup=kb_main_menu(role=user.role))
+        else:
+            await call.message.edit_text(text,
+            reply_markup=kb_main_menu(role=user.role))
+
+    except Exception:
+        await call.message.answer(text, reply_markup=kb_main_menu())
+
     await call.answer()
