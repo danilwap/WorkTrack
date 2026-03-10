@@ -88,6 +88,21 @@ def kb_yes_no(prefix: str) -> InlineKeyboardMarkup:
     kb.adjust(2)
     return kb.as_markup()
 
+
+def kb_yes_no_cancel_task(prefix: str, prefix_command: str, task_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+
+    kb.button(text="✅ Да", callback_data=f"{prefix}:yes")
+    kb.button(text="❌ Нет", callback_data=f"{prefix}:no")
+
+    kb.button(text="⬅️ Назад", callback_data=f"{prefix_command}:{task_id}")
+    kb.button(text="🏠 Меню", callback_data="main:menu")
+
+    kb.adjust(2, 1, 1)
+
+    return kb.as_markup()
+
+
 def kb_assignee_pick(employees: list[User], page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
 
@@ -102,9 +117,9 @@ def kb_assignee_pick(employees: list[User], page: int = 0, per_page: int = 8) ->
     # навигация
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="⬅️", callback_data=f"mtasks:assigneepage:{page-1}")
+        nav.button(text="⬅️", callback_data=f"mtasks:assigneepage:{page - 1}")
     if end < len(employees):
-        nav.button(text="➡️", callback_data=f"mtasks:assigneepage:{page+1}")
+        nav.button(text="➡️", callback_data=f"mtasks:assigneepage:{page + 1}")
 
     # собрать
     kb.adjust(1)
@@ -118,7 +133,8 @@ def kb_assignee_pick(employees: list[User], page: int = 0, per_page: int = 8) ->
     return kb.as_markup()
 
 
-def kb_task_comments(task_id: int, page: int, total_pages: int, comment_ids: list[int] | None = None) -> InlineKeyboardMarkup:
+def kb_task_comments(task_id: int, page: int, total_pages: int,
+                     comment_ids: list[int] | None = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
 
     # кнопки "открыть полностью" для комментов текущей страницы
@@ -129,15 +145,16 @@ def kb_task_comments(task_id: int, page: int, total_pages: int, comment_ids: lis
 
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="⬅️ Новее", callback_data=f"mtask:comments:{task_id}:{page-1}")
+        nav.button(text="⬅️ Новее", callback_data=f"mtask:comments:{task_id}:{page - 1}")
     if page + 1 < total_pages:
-        nav.button(text="➡️ Старее", callback_data=f"mtask:comments:{task_id}:{page+1}")
+        nav.button(text="➡️ Старее", callback_data=f"mtask:comments:{task_id}:{page + 1}")
     if nav.buttons:
         kb.row(*nav.buttons)
 
     kb.button(text="⬅️ Назад к задаче", callback_data=f"mtask:open:{task_id}")
     kb.adjust(1)
     return kb.as_markup()
+
 
 def kb_comment_full(task_id: int, comment_id: int, back_page: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
@@ -146,13 +163,13 @@ def kb_comment_full(task_id: int, comment_id: int, back_page: int) -> InlineKeyb
 
 
 def kb_tasks_pick(
-    tasks,
-    page: int = 0,
-    per_page: int = 8,
-    prefix: str = "mtask:open:",
-    back_text: str | None = None,
-    back_callback: str | None = None,
-    show_menu: bool = True,
+        tasks,
+        page: int = 0,
+        per_page: int = 8,
+        prefix: str = "mtask:open:",
+        back_text: str | None = None,
+        back_callback: str | None = None,
+        show_menu: bool = True,
 ) -> InlineKeyboardMarkup:
     """
     tasks: список Task (у которых есть .id и .title)
@@ -179,10 +196,10 @@ def kb_tasks_pick(
     # навигация
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="⬅️", callback_data=f"mtasks:pickpage:{page-1}")
-    nav.button(text=f"{page+1}/{pages}", callback_data="noop")
+        nav.button(text="⬅️", callback_data=f"mtasks:pickpage:{page - 1}")
+    nav.button(text=f"{page + 1}/{pages}", callback_data="noop")
     if page < pages - 1:
-        nav.button(text="➡️", callback_data=f"mtasks:pickpage:{page+1}")
+        nav.button(text="➡️", callback_data=f"mtasks:pickpage:{page + 1}")
 
     if nav.buttons:
         kb.row(*nav.buttons)
@@ -317,6 +334,7 @@ def kb_deadline_calendar(year: int, month: int, *, prefix: str = "mcal") -> Inli
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+
 def kb_deadline_hours(year: int, month: int, day: int, *, prefix: str = "mcal"):
     builder = InlineKeyboardBuilder()
     now = now_msk().replace(tzinfo=None)
@@ -355,4 +373,20 @@ def kb_deadline_minutes(year: int, month: int, day: int, hour: int, *, prefix: s
     builder.button(text="⬅️ К часам", callback_data=f"{prefix}:day:{year}:{month}:{day}")
     builder.adjust(4, 4, 4, 1)
     return builder.as_markup()
+
+
+def kb_yes_no_back_menu(yes_data: str, no_data: str, back_data: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Да", callback_data=yes_data),
+            InlineKeyboardButton(text="Нет", callback_data=no_data),
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=back_data),
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Меню", callback_data="main:menu"),
+        ]
+    ])
+
 

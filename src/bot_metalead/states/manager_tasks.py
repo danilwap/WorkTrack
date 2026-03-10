@@ -32,3 +32,7 @@ class ManagerTasks(StatesGroup):
     # Отмена задачи
     cancel_comment_ask = State()
     cancel_comment_text = State()
+
+    # Возращение на доработку
+    reject_comment_ask = State()
+    reject_comment_text = State()

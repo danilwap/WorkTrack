@@ -10,13 +10,13 @@ from aiogram.fsm.context import FSMContext
 
 
 from src.bot_metalead.filters.is_manager import IsManager
-from src.bot_metalead.services.tasks_notifications import notify_assignee
+from src.bot_metalead.services.tasks_notifications import notify_assignee, notify_user_tg
 from src.bot_metalead.db.repositories.tasks_repo import get_employees, \
     update_task_priority, get_task_by_id, is_task_closed, update_task_deadline
 from src.bot_metalead.db.session import session_scope
 from src.bot_metalead.utils.wizard_logic import wizard_show_from_callback
 from src.bot_metalead.db.models import TaskPriority
-from src.bot_metalead.keyboards.all_keyboards import kb_back_to_menu
+from src.bot_metalead.keyboards.all_keyboards import kb_back_to_menu, kb_main_menu
 from src.bot_metalead.states.manager_tasks import ManagerTasks
 
 from src.bot_metalead.keyboards.manager_tasks import (
@@ -479,6 +479,12 @@ async def cb_task_edit_assignee(call: CallbackQuery, state: FSMContext, bot: Bot
         task_id,
         f"👤 Менеджер назначил вас исполнителем задачи #{task_id}.",
         reply_markup=kb_task_open_user(task_id),
+    )
+
+    await notify_user_tg(
+        bot,
+        old_assignee_id,
+        f"❗ Вы больше не исполнитель задачи #{task_id}"
     )
 
     await wizard_show_from_callback(

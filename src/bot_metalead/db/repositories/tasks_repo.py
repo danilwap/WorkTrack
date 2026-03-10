@@ -9,7 +9,9 @@ from sqlalchemy.orm import selectinload
 
 from src.bot_metalead.db.repositories.users_repo import ensure_user, get_user_by_id
 from src.bot_metalead.db.session import session_scope
-from src.bot_metalead.db.models import Task, TaskStatus, TaskComment, User, UserRole, TaskPriority
+from src.bot_metalead.db.models import Task, TaskStatus, TaskComment, User, UserRole, TaskPriority, ApprovalDecision, \
+    TaskApproval
+from src.bot_metalead.utils.helpers import now_utc
 
 ACTIVE_TASK_STATUSES = [
     TaskStatus.new,
@@ -21,10 +23,11 @@ ACTIVE_TASK_STATUSES = [
 CLOSED_TASK_STATUSES = (
     TaskStatus.done,
     TaskStatus.cancelled,
-    TaskStatus.rejected,
 )
 
 DONE_ALLOWED_STATUSES = [TaskStatus.new, TaskStatus.in_progress]
+
+
 #
 async def get_task_with_creator(session, task_id: int) -> Task | None:
     q = await session.execute(
@@ -36,9 +39,9 @@ async def get_task_with_creator(session, task_id: int) -> Task | None:
 
 
 async def get_active_tasks_by_assignee(
-    session: AsyncSession,
-    assignee_id: int,
-    limit: int = 50,
+        session: AsyncSession,
+        assignee_id: int,
+        limit: int = 50,
 ) -> list[Task]:
     q = await session.execute(
         select(Task)
@@ -53,11 +56,10 @@ async def get_active_tasks_by_assignee(
     return q.scalars().all()
 
 
-
 async def get_active_task_for_assignee_with_details(
-    session: AsyncSession,
-    task_id: int,
-    assignee_id: int,
+        session: AsyncSession,
+        task_id: int,
+        assignee_id: int,
 ) -> Task | None:
     q = await session.execute(
         select(Task)
@@ -75,9 +77,9 @@ async def get_active_task_for_assignee_with_details(
 
 
 async def is_active_task_for_assignee(
-    session: AsyncSession,
-    task_id: int,
-    assignee_id: int
+        session: AsyncSession,
+        task_id: int,
+        assignee_id: int
 ) -> bool:
     q = await session.execute(
         select(Task.id).where(
@@ -89,14 +91,10 @@ async def is_active_task_for_assignee(
     return q.scalar_one_or_none() is not None
 
 
-
-
-
-
 async def get_task_for_done_by_assignee(
-    session: AsyncSession,
-    task_id: int,
-    assignee_id: int,
+        session: AsyncSession,
+        task_id: int,
+        assignee_id: int,
 ) -> Task | None:
     q = await session.execute(
         select(Task).where(
@@ -169,10 +167,10 @@ class CreatedTaskDTO:
 
 
 async def create_task_record(
-    session: AsyncSession,
-    manager_tg_user,
-    assignee_id: int,
-    data: dict,
+        session: AsyncSession,
+        manager_tg_user,
+        assignee_id: int,
+        data: dict,
 ) -> CreatedTaskDTO | None:
     manager = await ensure_user(session, manager_tg_user)
 
@@ -204,9 +202,9 @@ async def create_task_record(
 
 
 async def get_overdue_tasks(
-    session: AsyncSession,
-    now_utc: datetime,
-    limit: int = 50,
+        session: AsyncSession,
+        now_utc: datetime,
+        limit: int = 50,
 ) -> list[Task]:
     q = await session.execute(
         select(Task)
@@ -225,10 +223,10 @@ async def get_overdue_tasks(
 
 
 async def get_tasks_for_manager_filter(
-    session: AsyncSession,
-    flt: str,
-    now_utc: datetime,
-    limit: int = 50,
+        session: AsyncSession,
+        flt: str,
+        now_utc: datetime,
+        limit: int = 50,
 ) -> list[Task]:
     stmt = (
         select(Task)
@@ -264,9 +262,10 @@ async def get_tasks_for_manager_filter(
     q = await session.execute(stmt.limit(limit))
     return list(q.scalars().all())
 
+
 async def get_tasks_by_ids(
-    session: AsyncSession,
-    ids: list[int],
+        session: AsyncSession,
+        ids: list[int],
 ) -> list[Task]:
     if not ids:
         return []
@@ -280,9 +279,9 @@ async def get_tasks_by_ids(
 
 
 async def update_task_priority(
-    session: AsyncSession,
-    task_id: int,
-    priority: TaskPriority,
+        session: AsyncSession,
+        task_id: int,
+        priority: TaskPriority,
 ) -> bool:
     q = await session.execute(
         select(Task).where(Task.id == task_id)
@@ -297,8 +296,8 @@ async def update_task_priority(
 
 
 async def get_editable_task(
-    session: AsyncSession,
-    task_id: int,
+        session: AsyncSession,
+        task_id: int,
 ) -> Task | None:
     q = await session.execute(
         select(Task).where(
@@ -310,8 +309,8 @@ async def get_editable_task(
 
 
 async def get_task_by_id(
-    session: AsyncSession,
-    task_id: int,
+        session: AsyncSession,
+        task_id: int,
 ) -> Task | None:
     q = await session.execute(
         select(Task).where(Task.id == task_id)
@@ -324,9 +323,9 @@ def is_task_closed(task: Task) -> bool:
 
 
 async def update_task_deadline(
-    session: AsyncSession,
-    task_id: int,
-    deadline_at: datetime | None,
+        session: AsyncSession,
+        task_id: int,
+        deadline_at: datetime | None,
 ) -> Task | None:
     """
     Обновляет дедлайн задачи.
@@ -354,3 +353,98 @@ async def update_task_deadline(
     await session.commit()
 
     return task
+
+
+async def approve_task(session, task_id: int, manager_id: int):
+    q = await session.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = q.scalar_one_or_none()
+
+    if not task:
+        return None, "not_found"
+
+    if task.status != TaskStatus.on_review:
+        return None, "wrong_status"
+
+    session.add(
+        TaskApproval(
+            task_id=task_id,
+            manager_id=manager_id,
+            decision=ApprovalDecision.approved
+        )
+    )
+
+    task.status = TaskStatus.done
+    task.finished_at = now_utc()
+
+    await session.commit()
+
+    return task, None
+
+
+async def reject_task_by_manager(
+        session,
+        task_id: int,
+        manager_id: int,
+):
+    q = await session.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = q.scalar_one_or_none()
+
+    if not task:
+        return None, "not_found"
+
+    if task.status != TaskStatus.on_review:
+        return None, "wrong_status"
+
+    session.add(
+        TaskApproval(
+            task_id=task_id,
+            manager_id=manager_id,
+            decision=ApprovalDecision.rejected,
+        )
+    )
+
+    task.status = TaskStatus.rejected
+    task.finished_at = None
+
+    return task, None
+
+
+async def cancel_task_by_manager(
+        session: AsyncSession,
+        task_id: int,
+        manager_id: int,
+        comment_text: str | None = None,
+) -> tuple[Task | None, str | None]:
+    q = await session.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = q.scalar_one_or_none()
+
+    if not task:
+        return None, "not_found"
+
+    if task.status == TaskStatus.cancelled:
+        return None, "already_cancelled"
+
+    if task.status in {TaskStatus.done}:
+        return None, "already_closed"
+
+    comment_body = "Задача отменена менеджером."
+    if comment_text:
+        comment_body = f"{comment_body} Комментарий: {comment_text}"
+
+    session.add(
+        TaskComment(
+            task_id=task_id,
+            author_id=manager_id,
+            text=comment_body,
+        )
+    )
+
+    task.status = TaskStatus.cancelled
+    await session.commit()
+    return task, None

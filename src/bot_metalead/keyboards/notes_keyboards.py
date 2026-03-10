@@ -83,3 +83,5 @@ def kb_note_view(note_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🏠 Меню", callback_data="main:menu"),
         ],
     ])
+
+
