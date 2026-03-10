@@ -389,4 +389,23 @@ def kb_yes_no_back_menu(yes_data: str, no_data: str, back_data: str):
         ]
     ])
 
+def kb_tasks_stats_actions() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📥 Выгрузить статистику (Excel)", callback_data="mgr:tasks:export")
+    builder.button(text="⬅️ Меню", callback_data="main:menu")
+    builder.adjust(1)
+    return builder.as_markup()
 
+
+from aiogram.types import InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+
+def kb_export_period_pick() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📅 За неделю", callback_data="mgr:tasks:export_period:week")
+    builder.button(text="🗓 За месяц", callback_data="mgr:tasks:export_period:month")
+    builder.button(text="📊 За квартал", callback_data="mgr:tasks:export_period:quarter")
+    builder.button(text="⬅️ Меню", callback_data="main:menu")
+    builder.adjust(1)
+    return builder.as_markup()

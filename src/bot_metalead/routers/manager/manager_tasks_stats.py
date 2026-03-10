@@ -15,7 +15,8 @@ from sqlalchemy.orm import selectinload
 
 from src.bot_metalead.filters.is_manager import IsManager
 from src.bot_metalead.services.tasks_notifications import notify_assignee, notify_user_tg
-from src.bot_metalead.db.repositories.tasks_repo import get_employees, load_task, fetch_task_comments
+from src.bot_metalead.db.repositories.tasks_repo import get_employees, load_task, fetch_task_comments, get_tasks_stats, \
+    get_tasks_for_export
 from src.bot_metalead.db.session import session_scope
 from src.bot_metalead.db.repositories.users_repo import ensure_user, is_manager
 from src.bot_metalead.utils.manager_tasks import render_tasks_table, _short, _fmt_dt
@@ -41,10 +42,11 @@ from src.bot_metalead.keyboards.manager_tasks import (
     kb_edit_fields,
     kb_yes_no,
     kb_task_comments,
-    kb_comment_full, kb_tasks_pick, kb_employees_pick
+    kb_comment_full, kb_tasks_pick, kb_employees_pick, kb_export_period_pick, kb_tasks_stats_actions
 )
 
 from src.bot_metalead.keyboards.user_tasks import kb_task_open_user
+from src.bot_metalead.utils.excel_tasks_export import build_tasks_export_excel
 
 router = Router()
 
@@ -53,92 +55,21 @@ router = Router()
 @router.callback_query(F.data == "mgr:tasks:stats", IsManager())
 async def cb_manager_tasks_stats(call: CallbackQuery):
     async with session_scope() as session:
-        now = datetime.now(UTC)
+        stats = await get_tasks_stats(session=session)
 
-        q = await session.execute(
-            select(Task.status, func.count(Task.id))
-            .where(Task.status.in_([
-                TaskStatus.new,
-                TaskStatus.in_progress,
-                TaskStatus.on_review
-            ]))
-            .group_by(Task.status)
-        )
-        grouped = {status: count for status, count in q.all()}
-
-        new_count = grouped.get(TaskStatus.new, 0)
-        cancel_count = grouped.get(TaskStatus.cancelled, 0)
-        in_progress_count = grouped.get(TaskStatus.in_progress, 0)
-        on_review_count = grouped.get(TaskStatus.on_review, 0)
-        active_total = new_count + in_progress_count + on_review_count
-
-        q = await session.execute(
-            select(func.count(Task.id))
-            .where(
-                Task.status.in_([
-                    TaskStatus.new,
-                    TaskStatus.in_progress,
-                    TaskStatus.on_review
-                ]),
-                Task.deadline_at.is_not(None),
-                Task.deadline_at < now
-            )
-        )
-        overdue_count = q.scalar() or 0
-
-        q = await session.execute(
-            select(func.count(Task.id))
-            .where(
-                Task.status.in_([
-                    TaskStatus.new,
-                    TaskStatus.in_progress,
-                    TaskStatus.on_review
-                ]),
-                Task.assignee_id.is_(None)
-            )
-        )
-        unassigned_count = q.scalar() or 0
-
-        q = await session.execute(
-            select(func.count(Task.id))
-            .where(Task.status == TaskStatus.done)
-        )
-        done_count = q.scalar() or 0
-
-        Assignee = aliased(User)
-
-        q = await session.execute(
-            select(
-                Task.title,
-                Task.deadline_at,
-                Assignee.full_name,
-                Assignee.username
-            )
-            .select_from(Task)
-            .join(Assignee, Assignee.id == Task.assignee_id, isouter=True)
-            .where(
-                Task.status.in_([
-                    TaskStatus.new,
-                    TaskStatus.in_progress,
-                    TaskStatus.on_review
-                ])
-            )
-            .order_by(
-                Task.deadline_at.is_(None),
-                Task.deadline_at.asc(),
-                Task.created_at.desc()
-            )
-        )
-        items = q.all()
+    counts = stats["counts"]
+    items = stats["items"]
 
     text = (
         "📊 Статистика по задачам\n\n"
-        f"Всего активных: {active_total}\n"
-        f"• New: {new_count}\n"
-        f"• Отменённые: {cancel_count}\n"
-        f"• Просрочено: {overdue_count}\n"
-        f"• Без исполнителя: {unassigned_count}\n\n"
-        f"Завершённых: {done_count}"
+        f"Всего активных: {counts['active_total']}\n"
+        f"• 🆕 Новая: {counts['new']}\n"
+        f"• 🔧 В работе: {counts['in_progress']}\n"
+        f"• ❌ Отклоненных, ожидают исправления: {counts['rejected']}\n"
+        f"• 👀 На проверке: {counts['on_review']}\n"
+        f"• ⏰ Просроченных: {counts['overdue']}\n"
+        f"• ✅ Завершённых: {counts['done']}\n"
+        f"• 🚫 Отменённых: {counts['cancelled']}"
     )
 
     if call.message:
@@ -155,10 +86,9 @@ async def cb_manager_tasks_stats(call: CallbackQuery):
         images = render_tasks_table(
             rows=rows,
             title="Активные задачи",
-            rows_per_image=20
+            rows_per_image=20,
         )
 
-        # Удаляем старое сообщение с кнопкой, чтобы вместо него отправить фото с caption
         try:
             await call.message.delete()
         except Exception:
@@ -167,16 +97,84 @@ async def cb_manager_tasks_stats(call: CallbackQuery):
         for i, bio in enumerate(images, start=1):
             photo = BufferedInputFile(
                 bio.getvalue(),
-                filename=f"tasks_{i}.png"
+                filename=f"tasks_{i}.png",
             )
 
             if i == 1:
                 await call.message.answer_photo(
                     photo=photo,
                     caption=text,
-                    reply_markup=kb_back_to_menu()
+                    reply_markup=kb_tasks_stats_actions(),
                 )
             else:
                 await call.message.answer_photo(photo=photo)
+
+    await call.answer()
+
+@router.callback_query(F.data == "mgr:tasks:export", IsManager())
+async def cb_tasks_export_start(call: CallbackQuery, state: FSMContext):
+    await state.set_state(ManagerTasks.export_stats_period)
+
+    await wizard_show_from_callback(
+        call,
+        state,
+        "📥 Выгрузка статистики\n\nВыбери период:",
+        reply_markup=kb_export_period_pick(),
+    )
+    await call.answer()
+
+
+@router.callback_query(
+    ManagerTasks.export_stats_period,
+    F.data.startswith("mgr:tasks:export_period:"),
+    IsManager()
+)
+async def cb_tasks_export_period(call: CallbackQuery, state: FSMContext):
+    try:
+        period = call.data.split(":")[-1]
+    except Exception:
+        await call.answer("Некорректные данные кнопки.", show_alert=True)
+        return
+
+    now = datetime.now(UTC)
+
+    if period == "week":
+        date_from = now - timedelta(days=7)
+        period_label = "неделю"
+        filename_suffix = "week"
+    elif period == "month":
+        date_from = now - timedelta(days=30)
+        period_label = "месяц"
+        filename_suffix = "month"
+    elif period == "quarter":
+        date_from = now - timedelta(days=90)
+        period_label = "квартал"
+        filename_suffix = "quarter"
+    else:
+        await call.answer("Неизвестный период.", show_alert=True)
+        return
+
+    async with session_scope() as session:
+        tasks = await get_tasks_for_export(
+            session=session,
+            date_from=date_from,
+            date_to=now,
+        )
+
+    excel_io = build_tasks_export_excel(tasks)
+
+    file = BufferedInputFile(
+        excel_io.getvalue(),
+        filename=f"tasks_export_{filename_suffix}.xlsx",
+    )
+
+    try:
+        await call.message.answer_document(
+            document=file,
+            caption=f"📥 Выгрузка задач за {period_label}",
+            reply_markup=kb_back_to_menu(),
+        )
+    finally:
+        await state.clear()
 
     await call.answer()

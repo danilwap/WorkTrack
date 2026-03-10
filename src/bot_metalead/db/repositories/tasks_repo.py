@@ -1,11 +1,11 @@
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
 
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, aliased
 
 from src.bot_metalead.db.repositories.users_repo import ensure_user, get_user_by_id
 from src.bot_metalead.db.session import session_scope
@@ -448,3 +448,103 @@ async def cancel_task_by_manager(
     task.status = TaskStatus.cancelled
     await session.commit()
     return task, None
+
+
+async def get_tasks_stats(session: AsyncSession) -> dict:
+    now = datetime.now(UTC)
+
+    q = await session.execute(
+        select(Task.status, func.count(Task.id))
+        .where(Task.status.in_(ACTIVE_TASK_STATUSES))
+        .group_by(Task.status)
+    )
+    grouped = {status: count for status, count in q.all()}
+
+    new_count = grouped.get(TaskStatus.new, 0)
+    in_progress_count = grouped.get(TaskStatus.in_progress, 0)
+    on_review_count = grouped.get(TaskStatus.on_review, 0)
+    rejected_count = grouped.get(TaskStatus.rejected, 0)
+    active_total = new_count + in_progress_count + on_review_count + rejected_count
+
+    q = await session.execute(
+        select(func.count(Task.id)).where(Task.status == TaskStatus.cancelled)
+    )
+    cancelled_count = q.scalar() or 0
+
+    q = await session.execute(
+        select(func.count(Task.id)).where(
+            Task.status.in_(ACTIVE_TASK_STATUSES),
+            Task.deadline_at.is_not(None),
+            Task.deadline_at < now,
+        )
+    )
+    overdue_count = q.scalar() or 0
+
+    q = await session.execute(
+        select(func.count(Task.id)).where(
+            Task.status.in_(ACTIVE_TASK_STATUSES),
+            Task.assignee_id.is_(None),
+        )
+    )
+    unassigned_count = q.scalar() or 0
+
+    q = await session.execute(
+        select(func.count(Task.id)).where(Task.status == TaskStatus.done)
+    )
+    done_count = q.scalar() or 0
+
+    Assignee = aliased(User)
+
+    q = await session.execute(
+        select(
+            Task.title,
+            Task.deadline_at,
+            Assignee.full_name,
+            Assignee.username,
+        )
+        .select_from(Task)
+        .join(Assignee, Assignee.id == Task.assignee_id, isouter=True)
+        .where(Task.status.in_(ACTIVE_TASK_STATUSES))
+        .order_by(
+            Task.deadline_at.is_(None),
+            Task.deadline_at.asc(),
+            Task.created_at.desc(),
+        )
+    )
+    items = q.all()
+
+    return {
+        "counts": {
+            "active_total": active_total,
+            "new": new_count,
+            "in_progress": in_progress_count,
+            "on_review": on_review_count,
+            "cancelled": cancelled_count,
+            "overdue": overdue_count,
+            "unassigned": unassigned_count,
+            "done": done_count,
+            "rejected": rejected_count
+        },
+        "items": items,
+    }
+
+async def get_tasks_for_export(
+    session: AsyncSession,
+    date_from: datetime,
+    date_to: datetime,
+) -> list[Task]:
+    q = await session.execute(
+        select(Task)
+        .options(
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.comments),   # 👈 добавили
+        )
+        .where(
+            Task.created_at >= date_from,
+            Task.created_at < date_to,
+        )
+        .order_by(Task.created_at.desc())
+    )
+
+    return list(q.scalars().all())

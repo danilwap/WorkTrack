@@ -58,6 +58,6 @@ async def cb_main_menu(call: CallbackQuery, state: FSMContext):
             reply_markup=kb_main_menu(role=user.role))
 
     except Exception:
-        await call.message.answer(text, reply_markup=kb_main_menu())
+        await call.message.answer(text, reply_markup=kb_main_menu(role=user.role))
 
     await call.answer()

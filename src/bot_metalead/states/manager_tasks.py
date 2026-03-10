@@ -28,7 +28,6 @@ class ManagerTasks(StatesGroup):
     # tasks list filters
     list_pick_filter = State()
 
-
     # Отмена задачи
     cancel_comment_ask = State()
     cancel_comment_text = State()
@@ -36,3 +35,6 @@ class ManagerTasks(StatesGroup):
     # Возращение на доработку
     reject_comment_ask = State()
     reject_comment_text = State()
+
+    # Выгрузка статистики
+    export_stats_period = State()
