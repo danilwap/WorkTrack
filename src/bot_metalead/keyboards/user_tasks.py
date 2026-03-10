@@ -1,25 +1,6 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-from src.bot_metalead.db.models import TaskPriority, TaskStatus
-from src.bot_metalead.db.models import User
-
-def kb_task_card_user(task_id: int, status: str) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-
-    kb.button(text="➕ Добавить комментарий", callback_data=f"mtask:comment:{task_id}")
-    kb.button(text="💬 Комментарии", callback_data=f"mtask:comments:{task_id}:0")
-    kb.button(text="🔔 Напомнить", callback_data=f"mtask:remind:{task_id}")
-    kb.button(text="✏️ Изменить", callback_data=f"mtask:edit:{task_id}")
-    kb.button(text="🗑 Отменить", callback_data=f"mtask:cancel:{task_id}")
-    kb.button(text="⬅️ Назад к списку", callback_data="tasks:active")
-    kb.adjust(1, 1, 1, 2, 1, 1)
-    return kb.as_markup()
-
-
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
@@ -92,3 +73,10 @@ def kb_user_task_open(task_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🏠 Меню", callback_data="main:menu")],
         ]
     )
+
+def kb_task_open_user(task_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Открыть", callback_data=f"task:open:{task_id}")
+    kb.button(text="🏠 Меню", callback_data="main:menu")
+    kb.adjust(1)
+    return kb.as_markup()

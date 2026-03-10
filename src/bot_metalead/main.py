@@ -3,9 +3,7 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message
 from dotenv import load_dotenv
 
 
@@ -15,7 +13,8 @@ from src.bot_metalead.routers.handlers_start_manu import router as r_start
 from src.bot_metalead.routers.user import router as r_tasks
 from src.bot_metalead.routers.notes import router as r_notes
 from src.bot_metalead.services.reminders_service import reminders_loop
-from src.bot_metalead.routers.manager_tasks import router as manager_tasks_router
+from src.bot_metalead.routers.manager.manager_tasks import router as manager_tasks_router
+
 from src.bot_metalead.routers.admin_roles import router as admin_roles_router
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -43,7 +42,13 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(admin_roles_router)
+
+
     dp.include_router(manager_tasks_router)
+
+
+
+
     dp.include_router(r_start)
     dp.include_router(r_tasks)
     dp.include_router(r_notes)

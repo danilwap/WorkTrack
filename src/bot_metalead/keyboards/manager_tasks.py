@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.bot_metalead.db.models import TaskPriority, TaskStatus
 from src.bot_metalead.db.models import User
+
+import calendar
+from datetime import datetime
+
+from src.bot_metalead.utils.helpers import now_msk
 
 
 def kb_tasks_filters() -> InlineKeyboardMarkup:
@@ -20,16 +25,16 @@ def kb_tasks_filters() -> InlineKeyboardMarkup:
 
 def kb_priority_pick() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🟢 Low", callback_data=f"mtasks:prio:{TaskPriority.low.value}")
-    kb.button(text="🟡 Medium", callback_data=f"mtasks:prio:{TaskPriority.medium.value}")
-    kb.button(text="🟠 High", callback_data=f"mtasks:prio:{TaskPriority.high.value}")
-    kb.button(text="🔴 Urgent", callback_data=f"mtasks:prio:{TaskPriority.urgent.value}")
+    kb.button(text="🟢 Низкий", callback_data=f"mtasks:prio:{TaskPriority.low.value}")
+    kb.button(text="🟡 Средний", callback_data=f"mtasks:prio:{TaskPriority.medium.value}")
+    kb.button(text="🟠 Высокий", callback_data=f"mtasks:prio:{TaskPriority.high.value}")
+    kb.button(text="🔴 Срочный", callback_data=f"mtasks:prio:{TaskPriority.urgent.value}")
     kb.button(text="🏠 Меню", callback_data="main:menu")
     kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
-def kb_task_open(task_id: int) -> InlineKeyboardMarkup:
+def kb_task_open_manager(task_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="Открыть", callback_data=f"mtask:open:{task_id}")
     kb.button(text="🏠 Меню", callback_data="main:menu")
@@ -140,12 +145,21 @@ def kb_comment_full(task_id: int, comment_id: int, back_page: int) -> InlineKeyb
     return kb.as_markup()
 
 
-def kb_tasks_pick(tasks, page: int = 0, per_page: int = 8, prefix: str = "mtask:open:") -> InlineKeyboardMarkup:
+def kb_tasks_pick(
+    tasks,
+    page: int = 0,
+    per_page: int = 8,
+    prefix: str = "mtask:open:",
+    back_text: str | None = None,
+    back_callback: str | None = None,
+    show_menu: bool = True,
+) -> InlineKeyboardMarkup:
     """
     tasks: список Task (у которых есть .id и .title)
     Кнопки: по 1 задаче в строке + навигация
-    callback: mtask:open:<id>
+    callback задачи: mtask:open:<id>
     """
+
     kb = InlineKeyboardBuilder()
 
     total = len(tasks)
@@ -157,10 +171,10 @@ def kb_tasks_pick(tasks, page: int = 0, per_page: int = 8, prefix: str = "mtask:
     chunk = tasks[start:end]
 
     for t in chunk:
-        kb.button(text=f"🧩 #{t.id} — {t.title[:30]}", callback_data=f"{prefix}{t.id}")
+        title = (t.title[:30] + "…") if len(t.title) > 30 else t.title
+        kb.button(text=f"🧩 #{t.id} — {title}", callback_data=f"{prefix}{t.id}")
 
-    kb.button(text="🏠 Меню", callback_data="main:menu")
-
+    kb.adjust(1)
 
     # навигация
     nav = InlineKeyboardBuilder()
@@ -170,7 +184,175 @@ def kb_tasks_pick(tasks, page: int = 0, per_page: int = 8, prefix: str = "mtask:
     if page < pages - 1:
         nav.button(text="➡️", callback_data=f"mtasks:pickpage:{page+1}")
 
+    if nav.buttons:
+        kb.row(*nav.buttons)
+
+    # нижние кнопки
+    bottom = []
+    if back_text and back_callback:
+        bottom.append(
+            InlineKeyboardButton(text=back_text, callback_data=back_callback)
+        )
+    if show_menu:
+        bottom.append(
+            InlineKeyboardButton(text="🏠 Меню", callback_data="main:menu")
+        )
+
+    if bottom:
+        kb.row(*bottom)
+
+    return kb.as_markup()
+
+
+def kb_employees_pick(employees, page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
+    """
+    callback: mtasks:employee:<user_id>
+    пагинация: mtasks:employeepage:<page>
+    """
+    kb = InlineKeyboardBuilder()
+
+    total = len(employees)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = max(0, min(page, pages - 1))
+
+    start = page * per_page
+    end = start + per_page
+    chunk = employees[start:end]
+
+    for u in chunk:
+        name = u.full_name or (f"@{u.username}" if u.username else str(u.tg_id))
+        name = (name[:30] + "…") if len(name) > 31 else name
+        kb.button(text=f"👤 {name}", callback_data=f"mtasks:employee:{u.id}")
+
+    nav = InlineKeyboardBuilder()
+    if page > 0:
+        nav.button(text="⬅️", callback_data=f"mtasks:employeepage:{page - 1}")
+    nav.button(text=f"{page + 1}/{pages}", callback_data="noop")
+    if page < pages - 1:
+        nav.button(text="➡️", callback_data=f"mtasks:employeepage:{page + 1}")
+
     kb.adjust(1)
     kb.row(*nav.buttons)
 
+    # кнопка меню
+    kb.row(*InlineKeyboardBuilder().button(text="⬅️ К фильтрам", callback_data="mtasks:list").buttons)
+    kb.row(*InlineKeyboardBuilder().button(text="🏠 Меню", callback_data="main:menu").buttons)
+
     return kb.as_markup()
+
+
+def kb_deadline_calendar(year: int, month: int, *, prefix: str = "mcal") -> InlineKeyboardMarkup:
+    now = now_msk().replace(tzinfo=None)
+    today = now.date()
+
+    rows = []
+
+    current_month_start = datetime(today.year, today.month, 1)
+    shown_month_start = datetime(year, month, 1)
+
+    can_go_prev = shown_month_start > current_month_start
+
+    prev_year, prev_month = year, month - 1
+    next_year, next_month = year, month + 1
+
+    if prev_month == 0:
+        prev_month = 12
+        prev_year -= 1
+
+    if next_month == 13:
+        next_month = 1
+        next_year += 1
+
+    rows.append([
+        InlineKeyboardButton(
+            text="◀️" if can_go_prev else " ",
+            callback_data=f"{prefix}:open:{prev_year}:{prev_month}" if can_go_prev else f"{prefix}:ignore",
+        ),
+        InlineKeyboardButton(
+            text=f"{calendar.month_name[month]} {year}",
+            callback_data=f"{prefix}:ignore",
+        ),
+        InlineKeyboardButton(
+            text="▶️",
+            callback_data=f"{prefix}:open:{next_year}:{next_month}",
+        ),
+    ])
+
+    rows.append([
+        InlineKeyboardButton(text="Пн", callback_data=f"{prefix}:ignore"),
+        InlineKeyboardButton(text="Вт", callback_data=f"{prefix}:ignore"),
+        InlineKeyboardButton(text="Ср", callback_data=f"{prefix}:ignore"),
+        InlineKeyboardButton(text="Чт", callback_data=f"{prefix}:ignore"),
+        InlineKeyboardButton(text="Пт", callback_data=f"{prefix}:ignore"),
+        InlineKeyboardButton(text="Сб", callback_data=f"{prefix}:ignore"),
+        InlineKeyboardButton(text="Вс", callback_data=f"{prefix}:ignore"),
+    ])
+
+    month_days = calendar.Calendar(firstweekday=0).monthdayscalendar(year, month)
+    while len(month_days) < 6:
+        month_days.append([0] * 7)
+
+    for week in month_days:
+        row = []
+        for day in week:
+            if day == 0:
+                row.append(InlineKeyboardButton(text=" ", callback_data=f"{prefix}:ignore"))
+                continue
+
+            cell_date = datetime(year, month, day).date()
+
+            if cell_date < today:
+                row.append(InlineKeyboardButton(text="·", callback_data=f"{prefix}:ignore"))
+            else:
+                row.append(
+                    InlineKeyboardButton(
+                        text=str(day),
+                        callback_data=f"{prefix}:day:{year}:{month}:{day}",
+                    )
+                )
+        rows.append(row)
+
+    rows.append([InlineKeyboardButton(text="🚫 Без дедлайна", callback_data=f"{prefix}:none")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="menu:back")])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def kb_deadline_hours(year: int, month: int, day: int, *, prefix: str = "mcal"):
+    builder = InlineKeyboardBuilder()
+    now = now_msk().replace(tzinfo=None)
+
+    for hour in range(24):
+        dt = datetime(year, month, day, hour, 0)
+
+        if dt < now:
+            builder.button(text="·", callback_data=f"{prefix}:ignore")
+        else:
+            builder.button(
+                text=f"{hour:02d}",
+                callback_data=f"{prefix}:hour:{year}:{month}:{day}:{hour}"
+            )
+
+    builder.button(text="⬅️ К календарю", callback_data=f"{prefix}:open:{year}:{month}")
+    builder.adjust(6, 6, 6, 6, 1)
+    return builder.as_markup()
+
+
+def kb_deadline_minutes(year: int, month: int, day: int, hour: int, *, prefix: str = "mcal"):
+    builder = InlineKeyboardBuilder()
+    now = now_msk().replace(tzinfo=None)
+
+    for minute in [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]:
+        dt = datetime(year, month, day, hour, minute)
+
+        if dt < now:
+            builder.button(text="·", callback_data=f"{prefix}:ignore")
+        else:
+            builder.button(
+                text=f"{minute:02d}",
+                callback_data=f"{prefix}:minute:{year}:{month}:{day}:{hour}:{minute}"
+            )
+
+    builder.button(text="⬅️ К часам", callback_data=f"{prefix}:day:{year}:{month}:{day}")
+    builder.adjust(4, 4, 4, 1)
+    return builder.as_markup()
+

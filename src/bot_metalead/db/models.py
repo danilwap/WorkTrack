@@ -43,6 +43,16 @@ class TaskPriority(str, enum.Enum):
     high = "high"
     urgent = "urgent"
 
+    @property
+    def label(self) -> str:
+        labels = {
+            TaskPriority.low: "🟢 Низкий",
+            TaskPriority.medium: "🟡 Средний",
+            TaskPriority.high: "🟠 Высокий",
+            TaskPriority.urgent: "🔴 Срочный",
+        }
+        return labels[self]
+
 
 class TaskStatus(str, enum.Enum):
     new = "new"
@@ -51,6 +61,18 @@ class TaskStatus(str, enum.Enum):
     done = "done"
     rejected = "rejected"
     cancelled = "cancelled"
+
+    @property
+    def label(self) -> str:
+        labels = {
+            TaskStatus.new: "🆕 Новая",
+            TaskStatus.in_progress: "🔧 В работе",
+            TaskStatus.on_review: "👀 На проверке",
+            TaskStatus.done: "✅ Завершена",
+            TaskStatus.rejected: "❌ Отклонена",
+            TaskStatus.cancelled: "🚫 Отменена",
+        }
+        return labels[self]
 
 
 class ApprovalDecision(str, enum.Enum):

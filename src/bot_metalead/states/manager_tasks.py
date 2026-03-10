@@ -27,7 +27,7 @@ class ManagerTasks(StatesGroup):
 
     # tasks list filters
     list_pick_filter = State()
-    list_pick_employee = State()
+
 
     # Отмена задачи
     cancel_comment_ask = State()
