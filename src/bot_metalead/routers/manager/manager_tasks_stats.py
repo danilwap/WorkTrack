@@ -72,42 +72,71 @@ async def cb_manager_tasks_stats(call: CallbackQuery):
         f"• 🚫 Отменённых: {counts['cancelled']}"
     )
 
-    if call.message:
-        rows: list[tuple[str, str, str]] = []
+    if not call.message:
+        await call.answer("Не удалось открыть статистику.", show_alert=True)
+        return
 
-        for title, deadline_at, full_name, username in items:
-            assignee = full_name or (f"@{username}" if username else "—")
-            rows.append((
-                _short(assignee, 18),
-                _short(title, 36),
-                _fmt_dt(deadline_at),
-            ))
-
-        images = render_tasks_table(
-            rows=rows,
-            title="Активные задачи",
-            rows_per_image=20,
-        )
-
+    if not items:
         try:
             await call.message.delete()
         except Exception:
             pass
 
-        for i, bio in enumerate(images, start=1):
-            photo = BufferedInputFile(
-                bio.getvalue(),
-                filename=f"tasks_{i}.png",
-            )
+        await call.message.answer(
+            text + "\n\nАктивных задач для отображения нет.",
+            reply_markup=kb_tasks_stats_actions(),
+        )
+        await call.answer()
+        return
 
-            if i == 1:
-                await call.message.answer_photo(
-                    photo=photo,
-                    caption=text,
-                    reply_markup=kb_tasks_stats_actions(),
-                )
-            else:
-                await call.message.answer_photo(photo=photo)
+    rows: list[tuple[str, str, str]] = []
+
+    for title, deadline_at, full_name, username in items:
+        assignee = full_name or (f"@{username}" if username else "—")
+        rows.append((
+            _short(assignee, 18),
+            _short(title, 36),
+            _fmt_dt(deadline_at),
+        ))
+
+    images = render_tasks_table(
+        rows=rows,
+        title="Активные задачи",
+        rows_per_image=20,
+    )
+
+    if not images:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+
+        await call.message.answer(
+            text + "\n\nНе удалось сформировать таблицу задач.",
+            reply_markup=kb_tasks_stats_actions(),
+        )
+        await call.answer()
+        return
+
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+
+    for i, bio in enumerate(images, start=1):
+        photo = BufferedInputFile(
+            bio.getvalue(),
+            filename=f"tasks_{i}.png",
+        )
+
+        if i == 1:
+            await call.message.answer_photo(
+                photo=photo,
+                caption=text,
+                reply_markup=kb_tasks_stats_actions(),
+            )
+        else:
+            await call.message.answer_photo(photo=photo)
 
     await call.answer()
 
@@ -130,12 +159,12 @@ async def cb_tasks_export_start(call: CallbackQuery, state: FSMContext):
     IsManager()
 )
 async def cb_tasks_export_period(call: CallbackQuery, state: FSMContext):
-    try:
-        period = call.data.split(":")[-1]
-    except Exception:
-        await call.answer("Некорректные данные кнопки.", show_alert=True)
+    if not call.message:
+        await state.clear()
+        await call.answer("Не удалось отправить файл.", show_alert=True)
         return
 
+    period = call.data.split(":")[-1]
     now = datetime.now(UTC)
 
     if period == "week":
@@ -161,20 +190,27 @@ async def cb_tasks_export_period(call: CallbackQuery, state: FSMContext):
             date_to=now,
         )
 
+    if not tasks:
+        await state.clear()
+        await call.message.answer(
+            f"За {period_label} задач не найдено.",
+            reply_markup=kb_back_to_menu(),
+        )
+        await call.answer()
+        return
+
     excel_io = build_tasks_export_excel(tasks)
 
     file = BufferedInputFile(
         excel_io.getvalue(),
-        filename=f"tasks_export_{filename_suffix}.xlsx",
+        filename=f"tasks_export_{filename_suffix}_{now.strftime('%Y%m%d_%H%M')}.xlsx",
     )
 
-    try:
-        await call.message.answer_document(
-            document=file,
-            caption=f"📥 Выгрузка задач за {period_label}",
-            reply_markup=kb_back_to_menu(),
-        )
-    finally:
-        await state.clear()
+    await call.message.answer_document(
+        document=file,
+        caption=f"📥 Excel-выгрузка задач за {period_label}",
+        reply_markup=kb_back_to_menu(),
+    )
 
+    await state.clear()
     await call.answer()
