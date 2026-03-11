@@ -56,7 +56,5 @@ async def main():
     # фон по напоминаниям (в рамках процесса)
     asyncio.create_task(reminders_loop(bot))
 
-    await dp.start_polling(bot)
-
     bot = Bot(token=BOT_TOKEN)
     await dp.start_polling(bot)

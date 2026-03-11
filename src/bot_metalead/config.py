@@ -1,16 +1,22 @@
-import asyncio
 import logging
 import os
 
-from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram import Dispatcher
 from dotenv import load_dotenv
 from dataclasses import dataclass
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+
+DATABASE_URL = (
+    f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
+    f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+)
 
 if not BOT_TOKEN:
     raise RuntimeError("Не найден BOT_TOKEN. Укажи его в .env")
@@ -18,14 +24,6 @@ if not BOT_TOKEN:
 logging.basicConfig(level=logging.INFO)
 
 dp = Dispatcher()
-
-
-
-
-@dp.message()
-async def echo_handler(message: Message):
-    await message.answer(f"Ты написал: {message.text}")
-
 
 
 
